@@ -35,43 +35,45 @@ var Player = function (startX, startY, startAngle) {
 // and send a new player message to the client.
 function onNewplayer (data) {
     console.log(data);
-    //new player instance
+
+    //Созадем объект нового игрока
     var newPlayer = new Player(data.x, data.y, data.angle);
     console.log(newPlayer);
-    console.log("created new player with id " + this.id);
+
+    console.log("Создан новый игрок с  id " + this.id);
     newPlayer.id = this.id;
 
-    //information to be sent to all clients except sender
+    //Информация которая будет отправлена всем клиентам кроме отправляющего
     var current_info = {
         id: newPlayer.id,
         x: newPlayer.x,
         y: newPlayer.y,
-        angle: newPlayer.angle,
+        angle: newPlayer.angle
     };
 
-    //send to the new player about everyone who is already connected.
+    //Отправить информацию о всех игроках новому подключенному игроку
     for (i = 0; i < player_lst.length; i++) {
-        existingPlayer = player_lst[i];
+        var existingPlayer = player_lst[i];
         var player_info = {
             id: existingPlayer.id,
             x: existingPlayer.x,
             y: existingPlayer.y,
-            angle: existingPlayer.angle,
+            angle: existingPlayer.angle
         };
         console.log("pushing player");
-        //send message to the sender-client only
+        //Отправить информацию обо всех пользователях подключенному игроку
         this.emit("new_enemyPlayer", player_info);
     }
 
-    //send message to every connected client except the sender
+    //Отправить о подключенном игроке всем пользователям
     this.broadcast.emit('new_enemyPlayer', current_info);
 
     player_lst.push(newPlayer);
 
 }
 
-//update the player position and send the information back to every client except sender
-function onMovePlayer (data) {
+// обновляем позицию игрока и отправляем информацию каждому клиенту, кроме Отправителя
+function onMovePlayer (data) {   
     var movePlayer = find_playerid(this.id);
     movePlayer.x = data.x;
     movePlayer.y = data.y;
@@ -84,11 +86,11 @@ function onMovePlayer (data) {
         angle: movePlayer.angle
     }
 
-    //send message to every connected client except the sender
+    //отправить информацию о перемещениях игрока
     this.broadcast.emit('enemy_move', moveplayerData);
 }
 
-//call when a client disconnects and tell the clients except sender to remove the disconnected player
+//Удаляем пользователя отправляем информацию об удалении
 function onClientdisconnect() {
     console.log('disconnect');
 
@@ -105,7 +107,7 @@ function onClientdisconnect() {
 
 }
 
-// find player by the the unique socket id
+// Найти пользователя по id сокета
 function find_playerid(id) {
 
     for (var i = 0; i < player_lst.length; i++) {
@@ -122,7 +124,7 @@ function find_playerid(id) {
 // binds the serv object we created to socket.io
 var io = require('socket.io')(serv,{});
 
-// listen for a connection request from any client
+//События для соединенного клиента
 io.sockets.on('connection', function(socket){
     console.log("socket connected");
     socket.on('disconnect', onClientdisconnect);

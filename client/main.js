@@ -9,12 +9,15 @@ canvas_height = window.innerHeight * window.devicePixelRatio;
 //Создаем объект игры
 game = new Phaser.Game(canvas_width, canvas_height, Phaser.CANVAS,'gameDiv');
 
+
+var enemies = [];
+
 var gameProperties = {
     //Фактические размеры игры
     gameWidth: 4000,
     gameHeight: 4000,
     game_elemnt: "gameDiv",
-    in_game: false,
+    in_game: false
 };
 
 // Основное игровое состояние
@@ -48,6 +51,7 @@ function createPlayer () {
 // Добавить
 main.prototype = {
     preload: function() {
+        game.stage.disableVisibilityChange = true;
         game.scale.scaleMode = Phaser.ScaleManager.RESIZE;
         game.world.setBounds(0, 0, gameProperties.gameWidth, gameProperties.gameHeight, false, false, false, false);
         //Физическая система
@@ -59,12 +63,13 @@ main.prototype = {
         game.physics.p2.applyGravity = false;
         game.physics.p2.enableBody(game.physics.p2.walls, false);
         // Включить обнаружение столкновений
-        game.physics.p2.setImpactEvents(true);
+        game.physics.p2.setImpactEvents(true); 
     },
 
     //Функция запускается при запуске игры
     create: function () {
         game.stage.backgroundColor = 0xE1A193;
+        game.input.onUp.add(this.changePos, this);
         console.log("client started");
         //listen if a client successfully makes a connection to the server,
         //and call onsocketConnected
@@ -73,7 +78,6 @@ main.prototype = {
         socket.on("new_enemyPlayer", onNewPlayer);
         //listen to enemy movement
         socket.on("enemy_move", onEnemyMove);
-
         // when received remove_player, remove the player passed;
         socket.on('remove_player', onRemovePlayer);
 
@@ -82,9 +86,30 @@ main.prototype = {
     update: function () {
         //Если игра иницилизована
         if (gameProperties.in_game) {
-
+        
             // получаем положение мышки
             var pointer = game.input.mousePointer;
+        
+            //Дистанция до мышки
+            if (distanceToPointer(player, pointer) <= 50) {
+                //The player can move to mouse pointer at a certain speed.
+                //look at player.js on how this is implemented.
+                movetoPointer(player, 0, pointer, 100);
+            } else {
+                movetoPointer(player, 500, pointer);
+            }
+        
+            //Отправить на сервер координаты передвижения игрока
+            socket.emit('move_player', {x: player.x, y: player.y, angle: player.angle});
+        }
+    },
+    changePos:function(p)
+    {
+        //Если игра иницилизована
+        if (gameProperties.in_game) {
+
+            // получаем положение мышки
+            var pointer = p;
 
             //Дистанция до мышки
             if (distanceToPointer(player, pointer) <= 50) {
@@ -95,11 +120,13 @@ main.prototype = {
                 movetoPointer(player, 500, pointer);
             }
 
-            //Send a new position data to the server
+            //Отправить на сервер координаты передвижения игрока
             socket.emit('move_player', {x: player.x, y: player.y, angle: player.angle});
         }
     }
 }
+
+
 
 // this is the enemy class.
 var remote_player = function (id, startx, starty, start_angle) {
@@ -129,16 +156,14 @@ var remote_player = function (id, startx, starty, start_angle) {
 
 // Функция при коннекте игрока к серверу
 function onsocketConnected () {
-    //create a main player object for the connected user to control
+    //Создаем нового игрока
     createPlayer();
     gameProperties.in_game = true;
-    // send to the server a "new_player" message so that the server knows
-    // a new player object has been created
+    //отправьте серверу нашу начальную позицию и сообщите, что мы подключены
     socket.emit('new_player', {x: 0, y: 0, angle: 0});
 }
 
-// When the server notifies us of client disconnection, we find the disconnected
-// enemy and remove from our game
+//Удалить польователя который вышел
 function onRemovePlayer (data) {
     var removePlayer = findplayerbyid(data.id);
     // Player not found
@@ -146,22 +171,22 @@ function onRemovePlayer (data) {
         console.log('Player not found: ', data.id);
         return;
     }
-
+    //Удалем объект пользователя
     removePlayer.player.destroy();
+    //Удаляем пользователя из массива
     enemies.splice(enemies.indexOf(removePlayer), 1);
 }
 
-//Server will tell us when a new enemy player connects to the server.
-//We create a new enemy in our game.
+//Сервер сообщает о подключенному к игре игроку
+//Создаем врага в игре
 function onNewPlayer (data) {
-    console.log(data);
+    //console.log(data);
     //enemy object
     var new_enemy = new remote_player(data.id, data.x, data.y, data.angle);
     enemies.push(new_enemy);
 }
 
-//This is where we use the socket id.
-//Search through enemies list to find the right enemy of the id.
+//Ищем пользователя по id
 function findplayerbyid (id) {
     for (var i = 0; i < enemies.length; i++) {
         if (enemies[i].id == id) {
@@ -170,11 +195,11 @@ function findplayerbyid (id) {
     }
 }
 
-//Server tells us there is a new enemy movement. We find the moved enemy
-//and sync the enemy movement with the server
+// Сервер говорит нам, что есть новое движение врагов. Мы находим перемещенного врага
+// и синхронизируем движение противника с сервером
 function onEnemyMove (data) {
-    console.log(data.id);
-    console.log(enemies);
+    //console.log(data.id);
+    //console.log(enemies);
     var movePlayer = findplayerbyid (data.id);
 
     if (!movePlayer) {
