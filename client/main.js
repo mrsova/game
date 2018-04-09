@@ -25,11 +25,11 @@ var main = function(game){
 
 };
 
-function createPlayer () {
+function createPlayer (data) {
     //Используем объект графики
     player = game.add.graphics(0, 0);
     //Задаем радиус
-    player.radius = 100;
+    player.radius = data.size;
     //Задаем объект
     player.beginFill(0xffd900);
     //Задаем параметриы линии
@@ -40,17 +40,65 @@ function createPlayer () {
     player.endFill();
     //Устанавливаем точку в цетрне тяжести объекта
     player.anchor.setTo(0.5,0.5);
+
+    //Устанавливаем начальтный размер и радиус
     player.body_size = player.radius;
+    player.initial_size = player.radius;
+    player.type = "player_body";
 
     // Создаем объект. второй параметр включает режим отладки
     game.physics.p2.enableBody(player, true);
-    //Добавлем объект в боди
+    player.body.clearShapes();
     player.body.addCircle(player.body_size, 0 , 0);
+    player.body.data.shapes[0].sensor = true;
+    //Разрешить столкновение с други телом
+    player.body.onBeginContact.add(player_coll, this);
+    //Для того чтобы камера следила за игроком
+    game.camera.follow(player, Phaser.Camera.FOLLOW_LOCKON, 0.1, 0.1);
+
 }
+
+
+
+//Враг физика
+var remote_player = function (id, startx, starty, startSize, start_angle) {
+    this.x = startx;
+    this.y = starty;
+    //это уникальный идентификатор сокета. Мы используем его как уникальное имя для врага
+    this.id = id;
+    this.angle = start_angle;
+
+    this.player = game.add.graphics(this.x , this.y);
+    //инициализировать размер с помощью значения сервера
+    this.player.radius = startSize;
+
+    // установить стиль заливки и линии
+    this.player.beginFill(0xffd900);
+    this.player.lineStyle(2, 0xffd900, 1);
+    this.player.drawCircle(0, 0, this.player.radius * 2);
+    this.player.endFill();
+    this.player.anchor.setTo(0.5,0.5);
+
+    //Устанавливаем начальный размер
+    this.initial_size = startSize;
+    //Устанавливаем размер тела и радиус игрока
+    this.player.body_size = this.player.radius;
+
+    this.player.type = "player_body";
+    this.player.id = this.id;
+
+    // нарисовать форму
+    game.physics.p2.enableBody(this.player, true);
+    this.player.body.clearShapes();
+    this.player.body.addCircle(this.player.body_size, 0 , 0);
+    this.player.body.data.shapes[0].sensor = true;
+}
+
 
 // Добавить
 main.prototype = {
     preload: function() {
+        //Включить реальное время
         game.stage.disableVisibilityChange = true;
         game.scale.scaleMode = Phaser.ScaleManager.RESIZE;
         game.world.setBounds(0, 0, gameProperties.gameWidth, gameProperties.gameHeight, false, false, false, false);
@@ -63,110 +111,95 @@ main.prototype = {
         game.physics.p2.applyGravity = false;
         game.physics.p2.enableBody(game.physics.p2.walls, false);
         // Включить обнаружение столкновений
-        game.physics.p2.setImpactEvents(true); 
+        //game.physics.p2.setImpactEvents(true);
     },
 
     //Функция запускается при запуске игры
     create: function () {
         game.stage.backgroundColor = 0xE1A193;
-        game.input.onUp.add(this.changePos, this);
+        //game.input.onDown.add(this.update, this);
         console.log("client started");
         //listen if a client successfully makes a connection to the server,
         //and call onsocketConnected
         socket.on("connect", onsocketConnected);
+
+
+        socket.on("create_player", createPlayer);
         // //listen to new enemy connections
         socket.on("new_enemyPlayer", onNewPlayer);
         //listen to enemy movement
         socket.on("enemy_move", onEnemyMove);
         // when received remove_player, remove the player passed;
         socket.on('remove_player', onRemovePlayer);
+        //Когда игрок получает новый вход
+        socket.on('input_recieved', onInputRecieved);
+        //when the player gets killed
+        socket.on('killed', onKilled);
+        //when the player gains in size
+        socket.on('gained', onGained);
+        // check for item removal
+        socket.on ('itemremove', onitemremove);
+        // check for item update
+        socket.on('item_update', onitemUpdate);
 
     },
     //При обновлении
     update: function () {
-        //Если игра иницилизована
+        // //Если игра иницилизована
         if (gameProperties.in_game) {
-        
+
             // получаем положение мышки
             var pointer = game.input.mousePointer;
-        
-            //Дистанция до мышки
-            if (distanceToPointer(player, pointer) <= 50) {
-                //The player can move to mouse pointer at a certain speed.
-                //look at player.js on how this is implemented.
-                movetoPointer(player, 0, pointer, 100);
-            } else {
-                movetoPointer(player, 500, pointer);
-            }
-        
-            //Отправить на сервер координаты передвижения игрока
-            socket.emit('move_player', {x: player.x, y: player.y, angle: player.angle});
+
+            //Отправка информации о местоположении на сервер
+            socket.emit('input_fired', {
+                pointer_x: pointer.x,
+                pointer_y: pointer.y,
+                pointer_worldx: pointer.worldX,
+                pointer_worldy: pointer.worldY
+            });
         }
     },
-    changePos:function(p)
-    {
-        //Если игра иницилизована
-        if (gameProperties.in_game) {
-
-            // получаем положение мышки
-            var pointer = p;
-
-            //Дистанция до мышки
-            if (distanceToPointer(player, pointer) <= 50) {
-                //The player can move to mouse pointer at a certain speed.
-                //look at player.js on how this is implemented.
-                movetoPointer(player, 0, pointer, 100);
-            } else {
-                movetoPointer(player, 500, pointer);
-            }
-
-            //Отправить на сервер координаты передвижения игрока
-            socket.emit('move_player', {x: player.x, y: player.y, angle: player.angle});
-        }
+    render: function(){
+        game.debug.cameraInfo(game.camera, 32, 32);
     }
 }
 
 
-
-// this is the enemy class.
-var remote_player = function (id, startx, starty, start_angle) {
-    this.x = startx;
-    this.y = starty;
-    //this is the unique socket id. We use it as a unique name for enemy
-    this.id = id;
-    this.angle = start_angle;
-
-    this.player = game.add.graphics(this.x , this.y);
-    this.player.radius = 100;
-
-    // set a fill and line style
-    this.player.beginFill(0xffd900);
-    this.player.lineStyle(2, 0xffd900, 1);
-    this.player.drawCircle(0, 0, this.player.radius * 2);
-    this.player.endFill();
-    this.player.anchor.setTo(0.5,0.5);
-    this.player.body_size = this.player.radius;
-
-    // draw a shape
-    game.physics.p2.enableBody(this.player, true);
-    this.player.body.clearShapes();
-    this.player.body.addCircle(this.player.body_size, 0 , 0);
-    this.player.body.data.shapes[0].sensor = true;
-}
-
 // Функция при коннекте игрока к серверу
 function onsocketConnected () {
     //Создаем нового игрока
-    createPlayer();
     gameProperties.in_game = true;
     //отправьте серверу нашу начальную позицию и сообщите, что мы подключены
     socket.emit('new_player', {x: 0, y: 0, angle: 0});
 }
 
+//Получаем рассчетную позицию игрока с сервера
+function onInputRecieved(data) {
+
+    //Формируем новый указатель с позицией
+    var newPointer = {
+        x: data.x,
+        y: data.y,
+        worldX: data.x,
+        worldY: data.y
+    }
+
+    var distance = distanceToPointer(player, newPointer);
+    // мы получаем позицию игрока каждые 50 мс. Мы интерполируем
+    // между текущей позицией и новой позицией, чтобы игрок
+    // делал рывок.
+    speed = distance/0.05;
+
+    //Переводим игрока в новое положение
+    player.rotation = movetoPointer(player, speed, newPointer);
+
+}
+
+
 //Удалить польователя который вышел
 function onRemovePlayer (data) {
     var removePlayer = findplayerbyid(data.id);
-    // Player not found
     if (!removePlayer) {
         console.log('Player not found: ', data.id);
         return;
@@ -180,10 +213,9 @@ function onRemovePlayer (data) {
 //Сервер сообщает о подключенному к игре игроку
 //Создаем врага в игре
 function onNewPlayer (data) {
-    //console.log(data);
-    //enemy object
-    var new_enemy = new remote_player(data.id, data.x, data.y, data.angle);
+    var new_enemy = new remote_player(data.id, data.x, data.y, data.size, data.angle);
     enemies.push(new_enemy);
+    console.log(new_enemy);
 }
 
 //Ищем пользователя по id
@@ -198,17 +230,53 @@ function findplayerbyid (id) {
 // Сервер говорит нам, что есть новое движение врагов. Мы находим перемещенного врага
 // и синхронизируем движение противника с сервером
 function onEnemyMove (data) {
-    //console.log(data.id);
-    //console.log(enemies);
+    console.log("moving enemy");
+
     var movePlayer = findplayerbyid (data.id);
 
     if (!movePlayer) {
         return;
     }
-    movePlayer.player.body.x = data.x;
-    movePlayer.player.body.y = data.y;
-    movePlayer.player.angle = data.angle;
+
+    var newPointer = {
+        x: data.x,
+        y: data.y,
+        worldX: data.x,
+        worldY: data.y
+    }
+
+    //console.log(data);
+
+    //Проверить отличается ли размер сервера с клиентским
+    if (data.size != movePlayer.player.body_size) {
+        movePlayer.player.body_size = data.size;
+        var new_scale = movePlayer.player.body_size / movePlayer.initial_size;
+        movePlayer.player.scale.set(new_scale);
+        movePlayer.player.body.clearShapes();
+        movePlayer.player.body.addCircle(movePlayer.player.body_size, 0 , 0);
+        movePlayer.player.body.data.shapes[0].sensor = true;
+    }
+
+    var distance = distanceToPointer(movePlayer.player, newPointer);
+    speed = distance/0.05;
+
+    movePlayer.rotation = movetoPointer(movePlayer.player, speed, newPointer);
 }
+
+function onGained (data) {
+    player.body_size = data.new_size;
+    var new_scale = data.new_size/player.initial_size;
+    player.scale.set(new_scale);
+    //create new body
+    player.body.clearShapes();
+    player.body.addCircle(player.body_size, 0 , 0);
+    player.body.data.shapes[0].sensor = true;
+}
+
+function onKilled (data) {
+    player.destroy();
+}
+
 
 // Обернть игровые состояния
 var gameBootstrapper = {
