@@ -14,7 +14,7 @@ app.get('/',function(req, res) {
 });
 app.use('/client',express.static(__dirname + '/client'));
 
-serv.listen(process.env.PORT || 2000);
+serv.listen(process.env.PORT || 5556);
 console.log("Server started.");
 
 //Массив с игроками
@@ -49,13 +49,13 @@ var game_instance = new game_setup();
 
 //Класс игрока на сервере
 var Player = function (startX, startY, startAngle) {
-    this.x = startX
-    this.y = startY
-    this.angle = startAngle
+    this.x = startX;
+    this.y = startY;
+    this.angle = startAngle;
     this.speed = 500;
     //We need to intilaize with true.
     this.sendData = true;
-    this.size = getRndInteger(40, 100);
+    this.size = 40;
     this.dead = false;
 }
 
@@ -116,7 +116,8 @@ function onNewplayer (data) {
     console.log(data);
     //Новый игрок
     var newPlayer = new Player(data.x, data.y, data.angle);
-
+    newPlayer.id = this.id;
+    newPlayer.username = data.username;
     //Создать экземпляр физического тела игрока на сервере
     playerBody = new p2.Body ({
         mass: 0,
@@ -129,15 +130,17 @@ function onNewplayer (data) {
     world.addBody(newPlayer.playerBody);
 
     console.log("created new player with id " + this.id);
-    newPlayer.id = this.id;
 
-    this.emit('create_player', {size: newPlayer.size});
+
+
+    this.emit('create_player', {username:newPlayer.username, size: newPlayer.size});
 
     //информация, отправляемая всем клиентам, кроме отправителя
     var current_info = {
         id: newPlayer.id,
         x: newPlayer.x,
         y: newPlayer.y,
+        username:newPlayer.username,
         angle: newPlayer.angle,
         size: newPlayer.size
     };
@@ -147,6 +150,7 @@ function onNewplayer (data) {
         existingPlayer = player_lst[i];
         var player_info = {
             id: existingPlayer.id,
+            username: existingPlayer.username,
             x: existingPlayer.x,
             y: existingPlayer.y,
             angle: existingPlayer.angle,
@@ -165,8 +169,8 @@ function onNewplayer (data) {
     }
     //Отправить всем информацию о новом игроке
     this.broadcast.emit('new_enemyPlayer', current_info);
-
     player_lst.push(newPlayer);
+    sortPlayerListByScore();
 }
 
 //вместо того, чтобы слушать позиции игроков, мы слушаем пользовательские входы
@@ -264,8 +268,9 @@ function onPlayerCollision (data) {
         //send to everyone except sender.
         this.broadcast.emit('remove_player', {id: enemyPlayer.id});
         playerKilled(enemyPlayer);
-    }
 
+    }
+    sortPlayerListByScore();
     console.log("someone ate someone!!!");
 }
 
@@ -296,6 +301,7 @@ function onitemPicked (data) {
 
     //Очищаем на элемент массив с едой
     game_instance.food_pickup.splice(game_instance.food_pickup.indexOf(object), 1);
+    sortPlayerListByScore();
     //Отправить всем информацию о том что обект с едой удален
     io.emit('itemremove', object);
 
@@ -303,6 +309,13 @@ function onitemPicked (data) {
 }
 
 function playerKilled (player) {
+    //find the player and remove it.
+    var removePlayer = find_playerid(player.id);
+
+    if (removePlayer) {
+        player_lst.splice(player_lst.indexOf(removePlayer), 1);
+    }
+
     player.dead = true;
 }
 
@@ -321,7 +334,7 @@ function onClientdisconnect() {
     }
 
     console.log("removing player " + this.id);
-
+    sortPlayerListByScore();
     //Сообщить всем о том что пользователь удален
     this.broadcast.emit('remove_player', {id: this.id});
 
@@ -340,11 +353,38 @@ function find_playerid(id) {
     return false;
 }
 
+function sortPlayerListByScore() {
+    player_lst.sort(function(a,b) {
+        return b.size - a.size;
+    });
+
+    var playerListSorted = [];
+    for (var i = 0; i < player_lst.length; i++) {
+        // send the player username to the client so that clients can update the leaderboard.
+        playerListSorted.push({id: player_lst[i].id, username: player_lst[i].username, size: player_lst[i].size});
+    }
+
+    io.emit("leader_board", playerListSorted);
+}
+
+// when the player enters their name, trigger this function
+function onEntername (data) {
+    this.emit('join_game', {username: data.username, id: this.id});
+}
+
 // io connection
 var io = require('socket.io')(serv,{});
 
 io.sockets.on('connection', function(socket){
     console.log("socket connected");
+
+    //when the player enters their name
+    socket.on('enter_name', onEntername);
+
+    //when the player logs in
+    socket.on('logged_in', function(data){
+        this.emit('enter_game', {username: data.username});
+    });
 
     // listen for disconnection;
     socket.on('disconnect', onClientdisconnect);
